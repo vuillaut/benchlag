@@ -4,7 +4,7 @@
 
 **Try it in your browser: <https://vuillaut.github.io/benchlag/>** (nothing to install; the first load takes about 20 seconds).
 
-![Mistral Large 4 compared with the Claude Opus line](reports/eci_lag.png)
+![Mistral Large 4 compared with the all-labs frontier](reports/eci_lag.png)
 
 ## The idea in two minutes
 
@@ -14,17 +14,16 @@ A raw score difference is hard to interpret. "62% vs 71% on GPQA" doesn't tell m
 
 benchlag does this calculation. You pick a **target** model and a **reference** line of models (for example every version of Claude Opus). It finds the date at which the reference first reached the target's level and subtracts that date from the target's release date. The result is a lag in months.
 
-### Example: Mistral Large 4 vs Claude Opus
+### Example: Mistral Large 4
 
-With Epoch AI data from 25 November 2026:
+With Epoch AI data from 25 November 2026, on the composite index (ECI), with the 90% interval in brackets:
 
-| Measure | Lag | 90% interval |
-|---|---:|---|
-| Composite index (main result) | **9.7 months** | 7.1 – 11.0 |
-| Median over 15 individual benchmarks | 8.5 months | 7.8 – 10.4 |
-| Lag behind the best model from any lab | 10.6 months | |
+| Reference | Lag | Median over individual benchmarks |
+|---|---:|---:|
+| **All-labs frontier** (best model from anyone at each date; the default) | **11.0 months** (10.0 – 12.4) | 11.5 months (16 benchmarks) |
+| Claude Opus line only | 9.7 months (7.1 – 11.0) | 8.9 months (15 benchmarks) |
 
-Mistral Large 4 (released 29 October 2026) sits between Claude Opus 4.5 (November 2025) and Opus 4.6 (February 2026). The gap is small on agent and coding tasks (4–6 months) and large on factual knowledge and puzzles (around 15 months or more).
+Mistral Large 4 (released 29 October 2026) reached the level that the best models had in late November 2025, between Gemini 3 Pro and GPT-5.2 Pro. On the Claude Opus line, it sits between Opus 4.5 (November 2025) and Opus 4.6 (February 2026). Against Opus, the gap is small on agent and coding tasks (4–6 months) and large on factual knowledge and puzzles (around 15 months or more).
 
 These figures change as new results come in. The site and [`reports/latest.md`](reports/latest.md) always show the latest numbers.
 
@@ -37,11 +36,13 @@ The full protocol, with every rule and its rationale, is in [`PROTOCOLE.md`](PRO
 **Method A: one composite score (main result).** Epoch combines dozens of benchmarks into a single number, the [Epoch Capabilities Index](https://epoch.ai/eci) (ECI). The scale is anchored so that Claude 3.5 Sonnet scores 130 and GPT-5 scores 150. benchlag:
 
 1. takes the ECI of every version in the reference line, with its release date;
-2. keeps the best score reached so far at each date, so a weaker later version does not make the line go backwards;
-3. finds where that line crosses the target's ECI, interpolating linearly in time between the two versions on either side;
+2. keeps only the **records**: the releases that beat the best score reached so far. A weaker later version does not make the line go backwards, and models released on the same day count as one point;
+3. finds where the line through these records crosses the target's ECI, interpolating linearly in time between the last record below the target and the first one above it;
 4. reports the lag as the target's release date minus that crossing date.
 
-The uncertainty comes from repeating the calculation on the 500 resampled ("bootstrap") versions of the index that Epoch publishes. The report also gives the lag measured on real releases only, without interpolation: from the first reference version above the target, and from the last one below it.
+The uncertainty comes from repeating the calculation on the 500 resampled ("bootstrap") versions of the index that Epoch publishes. The report also gives the lag measured on real releases only, without interpolation: from the first record above the target, and from the last one below it.
+
+Working with records treats a short line (9 versions of Claude Opus) and a dense one (every model from every lab, almost one per week) the same way.
 
 **Method B: benchmark by benchmark (cross-check).** The same calculation runs on each individual benchmark the target was tested on. The median of these lags is compared with method A. This method also shows *where* the gap lies (knowledge, maths, code, agents). Benchmarks where the target is already near the maximum score are left out, because a fraction of a point there can be worth months.
 
@@ -57,7 +58,7 @@ The uncertainty comes from repeating the calculation on the 500 resampled ("boot
 
 ### In the browser
 
-Open <https://vuillaut.github.io/benchlag/>. The sidebar sets the reference: a preset line (Claude Opus, GPT, Gemini…), all models from one organisation, or your own name pattern. You can also add or remove reference models by hand. The page has two tabs:
+Open <https://vuillaut.github.io/benchlag/>. The sidebar sets the reference. The default is **the all-labs frontier**: the best model published by anyone at each date. You can also pick a preset line (Claude Opus, GPT, Gemini…), all models from one organisation, or your own name pattern. You can also add or remove reference models by hand. The page has two tabs:
 
 - **Un modèle**: one model in detail, with the key figures, an interactive chart and the per-benchmark table (CSV export);
 - **Comparer plusieurs modèles**: several models against the same reference, sorted by lag.

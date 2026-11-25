@@ -29,13 +29,14 @@ RAW = ROOT / "data" / "raw"
 # Palette catégorielle de référence (emplacements 1 et 2) + gris neutre.
 C_REF, C_TARGET, C_FRONT = "#257de0", "#f47230", "#9c9c9c"
 
+FRONTIER = "Frontière tous labos"
 PRESETS: dict[str, dict] = {
+    FRONTIER: dict(),  # tous les modèles de la base : le meilleur publié à chaque date
     "Claude Opus": dict(pattern=r"^Claude (?:\d+ )?Opus"),
     "Tous les modèles Anthropic": dict(org="Anthropic"),
     "GPT (OpenAI)": dict(pattern=r"^GPT-"),
     "Tous les modèles OpenAI": dict(org="OpenAI"),
     "Gemini (Google DeepMind)": dict(pattern=r"^Gemini"),
-    "Frontière tous labos": dict(),
     "Personnalisée": dict(),
 }
 STATUS_FR = {
@@ -98,12 +99,14 @@ with st.sidebar:
     except Exception as e:  # regex invalide
         st.error(f"Regex invalide : {e}")
         suggested = []
-    ref_models = st.multiselect(
-        "Modèles retenus (modifiables)",
-        options=models_by_date,
-        default=suggested,
-        key=f"ref::{preset}::{pattern}::{org}",
-    )
+    # La frontière compte ~250 modèles : la liste ouverte remplirait la barre latérale.
+    with st.expander(f"Modèles retenus ({len(suggested)})", expanded=len(suggested) <= 15):
+        ref_models = st.multiselect(
+            "Modifiables",
+            options=models_by_date,
+            default=suggested,
+            key=f"ref::{preset}::{pattern}::{org}",
+        )
     ref_label = st.text_input("Nom affiché", value=preset if preset != "Personnalisée" else (pattern or org or "Référence"))
 
     with st.expander("Réglages de la méthode"):
@@ -138,8 +141,16 @@ if not ref_models:
 
 
 def trajectory_chart(res: lag.EciResult) -> alt.LayerChart:
-    ref = res.reference.sort_values("date").copy()
-    ref["Série"] = ref_label
+    allref = res.reference.sort_values("date").copy()
+    allref["Série"] = ref_label
+    ref = lag.record_rows(allref)
+    others = allref.drop(ref.index)
+    # Avec beaucoup de records (frontière), on n'étiquette que les deux qui encadrent le croisement.
+    if len(ref) > 12:
+        keep = {res.point.date_last_below, res.point.date_first_above} - {None}
+        labelled = ref[ref["date"].isin(keep)]
+    else:
+        labelled = ref
     tooltip = [
         alt.Tooltip("Model:N", title="Modèle"),
         alt.Tooltip("date:T", title="Sortie", format="%Y-%m-%d"),
@@ -155,6 +166,9 @@ def trajectory_chart(res: lag.EciResult) -> alt.LayerChart:
         legend=alt.Legend(orient="top-left", title=None),
     )
     base = alt.Chart(ref)
+    background = alt.Chart(others).mark_point(filled=True, size=30, color=C_FRONT, opacity=0.5).encode(
+        x=x, y=alt.Y("eci:Q", scale=y_scale), tooltip=tooltip
+    )
     errs = base.mark_rule(strokeWidth=1.5).encode(
         x=x, y=alt.Y("eci_ci_low:Q", scale=y_scale, title="ECI"), y2="eci_ci_high:Q", color=color
     )
@@ -162,7 +176,16 @@ def trajectory_chart(res: lag.EciResult) -> alt.LayerChart:
     pts = base.mark_point(filled=True, size=80, stroke="white", strokeWidth=2).encode(
         x=x, y="eci:Q", color=color, tooltip=tooltip
     )
-    names = base.mark_text(align="left", dx=7, dy=10, fontSize=11).encode(x=x, y="eci:Q", text="Model:N")
+    # Labels alternate below-right / above-left to avoid overlaps.
+    lab = labelled.reset_index(drop=True)
+    names = alt.layer(
+        alt.Chart(lab.iloc[::2]).mark_text(align="left", dx=7, dy=12, fontSize=11).encode(
+            x=x, y="eci:Q", text="Model:N"
+        ),
+        alt.Chart(lab.iloc[1::2]).mark_text(align="right", dx=-7, dy=-12, fontSize=11).encode(
+            x=x, y="eci:Q", text="Model:N"
+        ),
+    )
 
     tgt = pd.DataFrame([{
         "Model": res.target_name, "date": res.target_date, "eci": res.target_eci,
@@ -173,7 +196,7 @@ def trajectory_chart(res: lag.EciResult) -> alt.LayerChart:
     t_pt = alt.Chart(tgt).mark_point(filled=True, size=110, stroke="white", strokeWidth=2).encode(
         x=x, y="eci:Q", color=color, tooltip=tooltip
     )
-    layers = [errs, line, pts, names, t_err, t_pt]
+    layers = [background, errs, line, pts, names, t_err, t_pt]
 
     if res.point.date is not None:
         seg = pd.DataFrame([{
@@ -263,17 +286,25 @@ with tab1:
         m3.metric("Médiane des benchmarks", f"{a['median']:.1f} mois" if a.get("n") else "–",
                   help=f"{a.get('n', 0)} benchmarks retenus" + (
                       f", IC 90 % {a['ci90'][0]:.1f} – {a['ci90'][1]:.1f}" if a.get("n") else ""))
-        m4.metric("Retard sur la frontière tous labos", f"{front.lag_months:.1f} mois" if front else "en tête")
+        recs = lag.record_rows(res.reference).set_index("date")["Model"]
+        above = recs.get(res.point.date_first_above)
+        below = recs.get(res.point.date_last_below)
+        if preset == FRONTIER:
+            # Le retard sur la frontière est déjà le chiffre principal : on montre qui l'a fixée.
+            m4.metric("Premier record au-dessus", above or "–",
+                      help="Premier modèle, tous labos confondus, à dépasser le niveau de la cible.")
+        else:
+            m4.metric("Retard sur la frontière tous labos", f"{front.lag_months:.1f} mois" if front else "en tête")
 
         bounds = ""
         if res.lag_first_above is not None and res.lag_last_below is not None:
-            bounds = (f" En versions réelles : {res.lag_first_above:.1f} mois sur la première version au-dessus, "
-                      f"{res.lag_last_below:.1f} mois sur la dernière en dessous.")
+            bounds = (f" Croisement interpolé entre deux records : {below} ({res.lag_last_below:.1f} mois avant "
+                      f"la cible) et {above} ({res.lag_first_above:.1f} mois avant).")
         elif res.point.status == "left_censored":
             bounds = " La cible est sous la plus ancienne version de la référence : le retard est **au moins** cette valeur."
         st.markdown(
-            f"**{target}** (sorti le {res.target_date:%Y-%m-%d}, ECI {res.target_eci:.1f}) : la lignée "
-            f"{ref_label} a atteint ce niveau vers le **{res.point.date:%Y-%m-%d}**.{bounds}"
+            f"**{target}** (sorti le {res.target_date:%Y-%m-%d}, ECI {res.target_eci:.1f}) : la référence "
+            f"« {ref_label} » a atteint ce niveau vers le **{res.point.date:%Y-%m-%d}**.{bounds}"
         )
 
         st.altair_chart(trajectory_chart(res), width="stretch")

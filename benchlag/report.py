@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+from . import lag  # noqa: E402
 from .lag import EciResult  # noqa: E402
 
 STATUS_FR = {
@@ -38,17 +39,25 @@ def chart(eci: EciResult, frontier_eci: pd.DataFrame | None, ref_label: str, out
 
 
 def make_figure(eci: EciResult, frontier_eci: pd.DataFrame | None, ref_label: str):
-    ref = eci.reference.sort_values("date")
+    allref = eci.reference.sort_values("date")
+    ref = lag.record_rows(allref)  # the line only goes through the records, like the calculation
+    others = allref.drop(ref.index)
     fig, ax = plt.subplots(figsize=(8, 4.5), dpi=150)
-    if frontier_eci is not None and not frontier_eci.empty:
-        f = frontier_eci.sort_values("date")
+    # Useless if the reference is already (almost) every model.
+    if frontier_eci is not None and not frontier_eci.empty and len(allref) < 0.9 * len(frontier_eci):
+        f = lag.record_rows(frontier_eci[frontier_eci["Model"] != eci.target_name])
         f = f[f["date"] >= ref["date"].min() - pd.Timedelta(days=90)]
-        ax.step(f["date"], np.maximum.accumulate(f["eci"]), where="post", color="#bbbbbb",
-                lw=1.2, label="Frontière tous labos (max cumulé)")
+        ax.plot(f["date"], f["eci"], color="#bbbbbb", lw=1.2, label="Frontière tous labos (records)")
+    if not others.empty:
+        ax.scatter(others["date"], others["eci"], color="#c96442", alpha=0.3, s=10, lw=0)
     ax.errorbar(ref["date"], ref["eci"], yerr=[ref["eci"] - ref["eci_ci_low"], ref["eci_ci_high"] - ref["eci"]],
                 fmt="o-", color="#c96442", ms=5, lw=1.5, capsize=2, label=ref_label)
-    for i, (_, r) in enumerate(ref.iterrows()):
-        # Étiquettes alternées dessous-droite / dessus-gauche pour éviter les chevauchements.
+    # With many records (dense reference), only the two around the crossing are labelled.
+    labelled = ref
+    if len(ref) > 12:
+        labelled = ref[ref["date"].isin({eci.point.date_last_below, eci.point.date_first_above} - {None})]
+    for i, (_, r) in enumerate(labelled.iterrows()):
+        # Labels alternate below-right / above-left to avoid overlaps.
         below = i % 2 == 0
         ax.annotate(r["Model"].replace("Claude Opus ", "Opus ").replace("Claude 3 Opus", "Opus 3"),
                     (r["date"], r["eci"]), xytext=(5, -12) if below else (-5, 8),
@@ -89,18 +98,18 @@ def write(
     a_pre = agg.get("précis", {})
 
     L = []
-    L.append(f"# Retard de {target} sur {ref_label}\n")
+    L.append(f"# Retard de {target} — référence : {ref_label}\n")
     L.append(f"Calculé le {dt.date.today().isoformat()} à partir de l'instantané Epoch AI `{snap.name}` "
              f"(données sous licence CC BY 4.0, [epoch.ai/benchmarks](https://epoch.ai/benchmarks)).\n")
     L.append("## Résultat\n")
     L.append(f"- **Indice composite ECI** : {target} ({_d(eci.target_date)}) obtient "
-             f"{eci.target_eci:.1f}. La lignée {ref_label} a atteint ce niveau vers le "
+             f"{eci.target_eci:.1f}. La référence « {ref_label} » a atteint ce niveau vers le "
              f"**{_d(eci.point.date)}**, soit un retard de **{_fmt(eci.lag_months)} mois** "
              f"(IC 90 % : {_fmt(ci[0])} à {_fmt(ci[1])} mois, {len(b)} tirages bootstrap).")
     if eci.lag_first_above is not None and eci.lag_last_below is not None:
         L.append(f"  - En versions réelles : entre {_fmt(eci.lag_first_above)} mois "
-                 f"(première version d'Opus au-dessus) et {_fmt(eci.lag_last_below)} mois "
-                 f"(dernière version en dessous).")
+                 f"(premier record de la référence au-dessus) et {_fmt(eci.lag_last_below)} mois "
+                 f"(dernier record en dessous).")
     if a_all.get("n"):
         L.append(f"- **Benchmark par benchmark** : médiane {_fmt(a_all['median'])} mois "
                  f"(IC 90 % : {_fmt(a_all['ci90'][0])} à {_fmt(a_all['ci90'][1])}) sur {a_all['n']} benchmarks.")
@@ -111,7 +120,11 @@ def write(
     if a_fin.get("n"):
         L.append(f"  - Sans repli sur la preview ({a_fin['n']} benchmarks) : médiane "
                  f"{_fmt(a_fin['median'])} mois (IC 90 % : {_fmt(a_fin['ci90'][0])} à {_fmt(a_fin['ci90'][1])}).")
-    if eci_frontier is None:
+    # Inutile de répéter le retard sur la frontière quand la référence est déjà la frontière.
+    same_ref = eci_frontier is not None and len(eci_frontier.reference) == len(eci.reference)
+    if same_ref:
+        pass
+    elif eci_frontier is None:
         L.append("- Pour situer : à sa sortie, la cible était en tête de la frontière tous laboratoires.")
     else:
         L.append(f"- Pour situer : retard sur la frontière tous laboratoires (meilleur ECI publié à chaque date) : "
@@ -120,9 +133,9 @@ def write(
 
     L.append("## Détail par benchmark\n")
     L.append("Score cible = meilleure configuration publiée. *Retard* = date de sortie de la cible moins la date "
-             "interpolée où la frontière Opus atteint ce score. *Bornes* = retard calculé sur la première version "
-             "d'Opus au-dessus / la dernière en dessous.\n")
-    L.append("| Benchmark | Variante cible | Score | Meilleur Opus | Statut | Retard (mois) | Bornes | Retenu |")
+             f"interpolée entre deux records de la référence ({ref_label}). *Bornes* = retard calculé sur le premier "
+             "record au-dessus / le dernier en dessous.\n")
+    L.append(f"| Benchmark | Variante cible | Score | Meilleur ({ref_label}) | Statut | Retard (mois) | Bornes | Retenu |")
     L.append("|---|---|---:|---:|---|---:|---|---|")
     for _, r in table.iterrows():
         flags = []
@@ -131,7 +144,7 @@ def write(
         if r["imprecise"]:
             flags.append(f"encadrement {r['bracket_months']:.0f} mois")
         if r["n_ref"] < 2:
-            flags.append("<2 Opus")
+            flags.append("<2 modèles réf.")
         used = "oui" if r["used"] else "non"
         if flags:
             used += f" ({', '.join(flags)})"

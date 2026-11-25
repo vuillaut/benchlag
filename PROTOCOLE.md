@@ -17,12 +17,14 @@ Chaque téléchargement est figé dans `data/raw/AAAA-MM-JJ/`, avec son empreint
 ## Méthode A : indice composite (résultat principal)
 
 1. On prend l'ECI de chaque version d'Opus et sa date de sortie.
-2. On construit la frontière Opus : à chaque date, le meilleur ECI atteint jusque-là. Une version qui régresse ne fait pas reculer la lignée.
-3. On cherche le point où cette frontière croise l'ECI du modèle cible, par interpolation linéaire dans le temps entre les deux versions qui l'encadrent.
+2. On ne garde que les **records** : les versions qui battent le meilleur ECI atteint jusque-là. Une version qui régresse ne fait pas reculer la lignée. Les modèles sortis le même jour comptent pour un seul point, le meilleur.
+3. On cherche le point où la ligne qui relie ces records croise l'ECI du modèle cible, par interpolation linéaire dans le temps entre le dernier record sous la cible et le premier au-dessus.
+
+Pourquoi les records seulement : si l'on interpolait entre deux modèles consécutifs quelconques, une référence dense (tous les labos, presque un modèle par semaine) donnerait des intervalles de quelques jours. On retomberait alors sur la date du premier modèle au-dessus, sans interpolation, alors qu'une lignée courte comme Opus serait interpolée sur plusieurs mois. Les deux chiffres ne seraient pas comparables. Avec les records, les deux cas suivent la même règle. Exemple : pour Mistral Large 4 face à tous les labos, l'interpolation se fait entre Gemini 3 Pro (18 novembre 2025, ECI 153,0) et GPT-5.2 Pro (11 décembre 2025, ECI 157,4). GPT-5.2, sorti le même jour que GPT-5.2 Pro, ne compte pas à part.
 4. Retard = date de sortie de la cible − date de croisement.
 5. On répète les étapes 2 à 4 sur les 500 tirages bootstrap d'Epoch. Les centiles 5 et 95 donnent l'intervalle à 90 %. L'incertitude porte à la fois sur le score de la cible et sur ceux d'Opus.
 
-Le rapport donne aussi deux bornes sans interpolation : le retard sur la première version d'Opus qui dépasse la cible, et celui sur la dernière version qui reste en dessous.
+Le rapport donne aussi deux bornes sans interpolation : le retard sur le premier record qui dépasse la cible, et celui sur le dernier record qui reste en dessous.
 
 ## Méthode B : benchmark par benchmark (contrôle)
 
@@ -61,7 +63,7 @@ L'ECI résume beaucoup de benchmarks en un seul nombre, mais il dépend du modè
 ## Limites connues
 
 - **Le retard dépend du rythme de la référence.** Opus a progressé lentement de 4.6 à 4.7 (+1,2 ECI en 2,5 mois), puis vite. Un même écart de niveau vaut plus ou moins de mois selon l'endroit où il tombe sur la courbe.
-- **L'interpolation suppose une progression continue entre deux sorties.** En réalité le niveau monte par paliers. Les bornes « première version au-dessus / dernière en dessous » donnent l'écart en versions réelles.
+- **L'interpolation suppose une progression continue entre deux sorties.** En réalité le niveau monte par paliers. Les bornes « premier record au-dessus / dernier en dessous » donnent l'écart en versions réelles.
 - **Couverture inégale.** Mistral Large 4 n'est mesuré que sur une quinzaine de benchmarks, Opus sur davantage. Les benchmarks agentiques (Terminal Bench, SWE-bench, OSWorld) manquent souvent pour la cible.
 - **Epoch peut réviser ses données.** L'historique (`reports/history.csv`) permet de voir si une révision change la réponse.
 

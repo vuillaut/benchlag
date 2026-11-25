@@ -22,40 +22,66 @@ DAYS_PER_MONTH = 365.25 / 12
 class Match:
     status: str  # "interpolated" | "left_censored" | "not_reached" | "insufficient"
     date: pd.Timestamp | None = None  # date interpolée où la référence atteint la cible
-    date_first_above: pd.Timestamp | None = None  # première version qui atteint la cible
-    date_last_below: pd.Timestamp | None = None  # dernière version sous la cible
+    date_first_above: pd.Timestamp | None = None  # first record at or above the target
+    date_last_below: pd.Timestamp | None = None  # last record below the target
     ref_first: pd.Timestamp | None = None
     ref_last: pd.Timestamp | None = None
 
 
-def match_date(dates: pd.Series, scores: pd.Series, target: float) -> Match:
-    """Date à laquelle la frontière de la référence (max cumulé) atteint `target`.
+def frontier_records(dates, scores) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Records of the reference: the points where its frontier (best score
+    reached so far) goes up.
 
-    Entre deux versions on interpole linéairement en temps. La frontière est
-    le meilleur score obtenu jusqu'ici : une version moins bonne que la
-    précédente ne fait pas reculer la lignée.
+    Models released on the same day count as a single point (the best one):
+    the frontier jumps on that date, it does not climb in between.
+    Returns (all dates, record dates, record scores), sorted by date.
     """
-    # Tableaux bruts : on ne veut pas d'alignement sur les index pandas.
-    df = pd.DataFrame({
-        "d": pd.to_datetime(np.asarray(dates)),
-        "s": np.asarray(scores, dtype=float),
-    }).dropna()
-    df = df.sort_values("d").reset_index(drop=True)
-    if df.empty:
+    d = pd.to_datetime(np.asarray(dates)).values
+    s = np.asarray(scores, dtype=float)
+    ok = ~np.isnan(s) & ~pd.isna(d)
+    d, s = d[ok], s[ok]
+    if len(s) == 0:
+        return d, d, s
+    order = np.argsort(d, kind="stable")
+    d, s = d[order], s[order]
+    days, start = np.unique(d, return_index=True)
+    best = np.maximum.reduceat(s, start)
+    front = np.maximum.accumulate(best)
+    is_record = np.r_[True, best[1:] > front[:-1]]
+    return days, days[is_record], best[is_record]
+
+
+def record_rows(ref: pd.DataFrame, score: str = "eci") -> pd.DataFrame:
+    """Rows of the models that beat the reference's record (same rule as
+    frontier_records: one point per day, the best one, then only strict increases)."""
+    r = ref.sort_values(["date", score], ascending=[True, False]).drop_duplicates("date")
+    return r[r[score] > r[score].cummax().shift(fill_value=-np.inf)]
+
+
+def match_date(dates, scores, target: float) -> Match:
+    """Date at which the reference's frontier reaches `target`.
+
+    The frontier is the best score reached so far: a version weaker than the
+    previous one does not pull the lineage back. The crossing is interpolated
+    linearly in time between two successive records (the last one below the
+    target, the first one at or above it). Models that are not records do not
+    count: a dense reference (all labs) and a sparse lineage (one family) are
+    thus treated the same way.
+    """
+    days, rd, rs = frontier_records(dates, scores)
+    if len(rs) == 0:
         return Match("insufficient")
-    front = np.maximum.accumulate(df["s"].to_numpy(dtype=float))
-    d = df["d"]
-    m = Match("insufficient", ref_first=d.iloc[0], ref_last=d.iloc[-1])
-    if target <= front[0]:
-        m.status, m.date, m.date_first_above = "left_censored", d.iloc[0], d.iloc[0]
+    ts = pd.Timestamp
+    m = Match("insufficient", ref_first=ts(days[0]), ref_last=ts(days[-1]))
+    if target <= rs[0]:
+        m.status, m.date, m.date_first_above = "left_censored", ts(rd[0]), ts(rd[0])
         return m
-    if target > front[-1]:
-        m.status, m.date_last_below = "not_reached", d.iloc[-1]
+    if target > rs[-1]:
+        m.status, m.date_last_below = "not_reached", ts(days[-1])
         return m
-    k = int(np.argmax(front >= target))
-    f0, f1 = front[k - 1], front[k]
-    t0, t1 = d.iloc[k - 1], d.iloc[k]
-    frac = (target - f0) / (f1 - f0)
+    k = int(np.argmax(rs >= target))
+    t0, t1 = ts(rd[k - 1]), ts(rd[k])
+    frac = (target - rs[k - 1]) / (rs[k] - rs[k - 1])
     m.status = "interpolated"
     m.date = t0 + (t1 - t0) * frac
     m.date_first_above, m.date_last_below = t1, t0
