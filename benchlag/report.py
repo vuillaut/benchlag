@@ -151,7 +151,7 @@ def write(
     md.write_text("\n".join(L))
 
     summary = dict(
-        computed_at=dt.datetime.now().isoformat(timespec="seconds"),
+        computed_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         snapshot=snap.name,
         target=target,
         reference=ref_label,
