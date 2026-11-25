@@ -1,0 +1,20 @@
+# Modèle évalué. Le premier nom est le modèle principal ; les suivants servent
+# de repli, benchmark par benchmark, quand le principal n'a pas de score.
+target = ["Mistral Large 4", "Mistral Large 4 Preview"]
+
+# Lignée de référence : regex appliquée aux noms de modèles Epoch.
+reference_pattern = "^Claude (?:\\d+ )?Opus"
+reference_label = "Claude Opus"
+
+# Exclut un benchmark si le score cible dépasse cette fraction de la marge
+# utile (entre le hasard et le plafond) : près du plafond, l'écart ne veut plus rien dire.
+saturation_fraction = 0.92
+
+# Au-delà de cet écart (mois) entre les deux versions d'Opus qui encadrent le
+# score, la date interpolée est jugée imprécise.
+max_bracket_months = 6
+
+bootstrap_samples = 2000
+seed = 42
+
+source_url = "https://epoch.ai/data/benchmark_data.zip"

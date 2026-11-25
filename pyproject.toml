@@ -1,0 +1,23 @@
+[project]
+name = "benchlag"
+version = "0.1.0"
+description = "Estime le retard (en mois) d'un modèle sur une lignée de référence à partir des benchmarks publics d'Epoch AI"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "fonttools<4.69",
+    "streamlit>=1.67.0",
+]
+
+[project.scripts]
+benchlag = "benchlag.cli:main"
+benchlag-ui = "benchlag.ui:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

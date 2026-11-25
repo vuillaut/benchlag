@@ -1,0 +1,71 @@
+# Updates the Epoch AI data, recomputes the report and redeploys the site
+# (GitHub Pages) on the 1st and 15th of each month, and on every push to main.
+name: Data update and site deployment
+
+on:
+  schedule:
+    - cron: "0 5 1,15 * *"  # 05:00 UTC on the 1st and 15th
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # commit the report and its history
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+
+      - name: Dependencies
+        run: uv sync --frozen
+
+      - name: Download data and compute the report
+        run: uv run benchlag
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Build the static site
+        run: uv run python scripts/build_site.py
+
+      # Keeps the report and lag history in the repository. Data snapshots
+      # are not committed (6 MB each); Epoch keeps them.
+      # A commit made with GITHUB_TOKEN does not retrigger the workflow.
+      - name: Commit the report
+        if: github.event_name != 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          if git diff --cached --quiet; then
+            echo "Report unchanged."
+          else
+            git commit -m "Data update $(cat data/raw/LATEST)"
+            git push
+          fi
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

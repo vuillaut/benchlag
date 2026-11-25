@@ -1,0 +1,2 @@
+computed_at,snapshot,target,eci_lag,eci_ci_low,eci_ci_high,bench_median,bench_n
+2026-11-25T14:07:54,2026-11-25,Mistral Large 4,9.659137577002053,7.0620123203285425,11.039014373716633,8.542094455852157,15
