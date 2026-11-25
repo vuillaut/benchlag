@@ -7,6 +7,7 @@ app in the browser via Pyodide, with no Python server.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -84,7 +85,14 @@ def main() -> None:
         if (ROOT / rel).exists():
             copy(ROOT / rel, rel)
 
-    files = {p: {"url": f"./{p}"} for p in mounted}
+    # Content fingerprint in each URL: GitHub Pages allows 10 minutes of
+    # caching (max-age=600), so without it the browser would keep the old
+    # Python code after a deployment.
+    def url(rel: str) -> str:
+        digest = hashlib.sha256((out / rel).read_bytes()).hexdigest()[:12]
+        return f"./{rel}?v={digest}"
+
+    files = {p: {"url": url(p)} for p in mounted}
     (out / "index.html").write_text(
         PAGE.format(stlite=STLITE, snapshot=snap, files=json.dumps(files, indent=8))
     )
